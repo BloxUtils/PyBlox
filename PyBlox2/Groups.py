@@ -1,25 +1,41 @@
 """
-The MIT License (MIT)
+`Groups` is the main module for managing interactions with the group API
 
-Copyright (c) Kyando 2020
+Contents:
+    `BloxGroup`: `BloxType`
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Requires:
+    `Errors`: `*`
+    `Base`: `BloxType`
+    `User`: `BloxUser`
+    `Ranks`: `BloxRank`
+    `Settings`: `BloxSettings`
+    `Member`: `BloxMember`
+    `.utils`: `Url`, `read_pages`
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+The following code is provided with: 
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+    The MIT License (MIT)
+
+    Copyright (c) Kyando 2020
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
 """
 
 import json
@@ -31,16 +47,34 @@ from .User import BloxUser
 from .Ranks import BloxRank
 from .Settings import BloxSettings
 from .Member import BloxMember
-from .utils import Url
+from .utils import Url, read_pages
 
 
 class BloxGroup(BloxType):
+    """
+    A handler for a roblox group
 
+    Attrs:
+        `id`
+        `roles`
+
+    Fetchables:
+        `join_requests`
+        `name`
+        `members`
+
+    Meths:
+        async `fetch`:
+            >> name = await group.fetch("name") # where `group` is a BloxGroup
+
+    Fetched users *will* be added to cache when using async meth `fetch`
+    Attr `roles` will be deprecated in 1.1 in favor of Fetchable `roles`
+    """
     def __init__(self, client, group_id, roles):
         super().__init__(client)
         self.id = str(group_id)
         self.roles = roles
-        self.can_fetch("join_requests", "members", "name")
+        self.can_fetch("join_requests", "members", "name", "settings")
 
     def __str__(self):
         if self.name:
@@ -59,6 +93,7 @@ class BloxGroup(BloxType):
 
         return name
 
+    # TODO: find a better way to do this (see BloxRank)
     async def _cvrt_dict_blox_member(self, list):
         real_list = []
         for user_dict in list:
@@ -67,6 +102,9 @@ class BloxGroup(BloxType):
         return real_list
 
     async def get_role(self, name: str):
+        """
+        Returns a BloxRank with the given name
+        """
         hook = await Url("groups", "/v1/groups/%id%/roles", id=self.id).get()
         
         data = hook.json
@@ -81,94 +119,46 @@ class BloxGroup(BloxType):
         return BloxMember(client=self.client, user_id=user.id, username=username, group=self)
 
     async def fetch_members(self):
-        '''
+        """
         Returns a list of all the group's members
-        '''
-        list_members = []
+        """
 
         access = Url("groups", "/v1/groups/%id%/users?sortOrder=Asc&limit=100", id=self.id)
 
-        hook = await access.get()
+        def create_members(raw_data):
+            return [BloxMember(client=self.client, user_id=str(user_dict.get("userId")), username=user_dict.get("username"), group=self) for user_dict in raw_data.get("data")]
 
-        def create_members(group, list):
-
-            result_list = []
-
-            for user_info_dict in list:
-                user_dict = user_info_dict.get("user")
-                result_list.append(BloxMember(client=self.client, user_id=str(user_dict.get("userId")), username=user_dict.get("username"), group=group))
-
-            return result_list
-
-        data = hook.json
-        list_members.extend(create_members(self, data.get("data")))
-
-        done = False
-
-        next_page = data.get("nextPageCursor")
-        
-        while not done:
-
-            if not isinstance(next_page, str):
-                done = True
-                continue
-
-            data = await access.get()
-            data = data.json
-            next_page = data.get("nextPageCursor")
-            list_members.extend(create_members(self, data.get("data")))
+        list_members = await read_pages(access, create_members)
         
         return list_members
 
     async def fetch_join_requests(self):
-        '''
+        """
         Returns a list of users that request to join the group
-        '''
+
+        Fetches settings
+        """
+        await self.fetch("settings")
+
         if not self.settings.is_approval_required:
             raise PyBloxException(
                 "This group isn't approval required and has no join requests"
                 )
 
-        list_members = []
+        access = Url("groups", "/v1/groups/%id%/join-requests?sortOrder=Asc&limit=100", id=self.id)
 
-        access = Url("groups", "/v1/groups/%id%/users?sortOrder=Asc&limit=100", id=self.id)
+        def create_users(raw_data):
+            return [BloxUser(client=self.client, user_id=str(user_dict['user'].get("userId")), username=user_dict['user'].get("username")) for user_dict in raw_data.get("data")]
 
-        def create_users(list):
-
-            result_list = []
-
-            for user_info_dict in list:
-                user_dict = user_info_dict.get("requester")
-                result_list.append(BloxUser(client=self.client, user_id=str(user_dict.get("userId")), username=user_dict.get("username")))
-
-            return result_list
-
-        data = await access.get()
-        data = data.json
-        list_members.extend(create_users(data.get("data")))
-
-        done = False
-
-        next_page = data.get("nextPageCursor")
-        
-        while not done:
-
-            if not isinstance(next_page, str):
-                done = True
-                continue
-
-            data = await access.get()
-            data = data.json
-            next_page = data.get("nextPageCursor")
-            list_members.extend(create_users(data.get("data")))
+        list_members = await read_pages(access, create_users)
 
         return list_members
 
     async def fetch_settings(self):
-        '''
-        Get the group's settings and return them as BloxSettings object
-        '''
-        access = Url("groups", "v1/groups/%id%/settings", id=self.id)
+        """
+        Returns a `BloxSetting` object
+        """
+        access = Url("groups", "/v1/groups/%id%/settings", id=self.id)
         data = await access.get()
         data = data.json
 

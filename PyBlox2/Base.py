@@ -72,11 +72,12 @@ class BloxType():
         self.client = client
         self.fetchable = []
 
-    async def fetch(self, attr: str):
-        if attr in self.fetchable:
-            resp = await self._fetcher(attr)
-            setattr(self, "_"+attr, resp)
-            return resp
+    async def fetch(self, *attrs):
+        for attr in attrs:
+            if attr in self.fetchable:
+                resp = await self._fetcher(attr)
+                setattr(self, "_"+attr, resp)
+                return resp
 
     def can_fetch(self, *data):
         self.fetchable.extend(data)
@@ -97,9 +98,8 @@ class BloxType():
 
 class DataContainer():
     """
-    Abstract class with a __dict__ and a __data, abstracting the __dict__ and only showing __data
-
-    This can be used to make it still have some hidden values while only showing the __data containing the abstract information
+    Abstract class emulating a dict type by using a hidden __data value
+    This class still allows access through the object.attribute notation
     """
     def __init__(self):
         self.__data = {}
@@ -117,6 +117,24 @@ class DataContainer():
             return False
         return True
 
+    def __getitem__(self, key):
+        return self.find(key)
+    
+    def __setitem__(self, key, value):
+        self.add(key, value)
+
+    def __contains__(self, key):
+        if key in self.__data:
+            return True
+        return False
+
+    def __iter__(self):
+        return iter(self.__data)
+    
+    def __getattr__(self, key):
+        if self[key]:
+            return self[key]
+        return None
 
 class Emitter(DataContainer):
     """

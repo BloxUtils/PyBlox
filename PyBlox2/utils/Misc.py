@@ -1,13 +1,13 @@
 """
-`Response` is a low level module managing responses from the roblox API
+`Misc` utilities
 
 Contents:
-    `BloxResponse`: No parent
+    func `read_pages`
 
 Requires:
-    N/A
+    `.utils`: `Url`
 
-The following code is provided with 
+The following code is provided with: 
 
     The MIT License (MIT)
 
@@ -32,24 +32,36 @@ The following code is provided with
     SOFTWARE.
 """
 
-import json
+from ..utils import Url
 
-class BloxResponse:
+CURSOR_IDENTIFIER = "nextPageCursor"
+
+async def read_pages(access: Url, converter):
     """
-    A response from the Roblox API
+    Loops through pages using the cursor and returns a list of all the results after using the converter function
 
-    Attrs:
-        `status`
-        `text`
-        `headers` -> May or may not exist
-        `json`
+    access must be a `get`-able Url object and converter much be a function which takes the received data and converts it 
+    to the wanted type or format, this will usually be achieved through the use of list comprehension
     """
-    def __init__(self, status, text: str, headers=None):
-        self.status = status
-        self.text = text
-        if headers:
-            self.headers = headers
+    result = []
 
-    @property
-    def json(self):
-        return json.loads(self.text)
+    hook = await access.get()
+    data = hook.json
+    result.extend(converter(data))
+
+    done = False
+
+    next_page = data.get(CURSOR_IDENTIFIER)
+
+    while not done:
+
+        if not isinstance(next_page, str):
+            done = True
+            continue
+
+        hook = await access.get()
+        data = hook.json
+        next_page = data.get(CURSOR_IDENTIFIER)
+        result.extend(converter(data))
+
+    return result
